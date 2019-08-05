@@ -1,4 +1,4 @@
-"""Модель на основе Keras с сгенеренными приззнаками."""
+"""Модель на основе Keras с сырыми данными а-ля RezNet."""
 import pathlib
 
 from keras import backend
@@ -21,82 +21,109 @@ DATA_PATH.mkdir(parents=True, exist_ok=True)
 
 FOLDS = 10
 EPOCHS = 100
-BATCH = 8
-UNITS = 16
-HEIGHT = 4
-LR_MAX = 8.5e-04
+FILTERS = 64
+HEIGHT = 6
+LR_MAX = 2.5e-04
 
 
-def make_features(votes):
-    """Создает признаки для обучения."""
-    feat = votes.groupby("itemId")[COORDINATES].median()
-    feat2 = votes.groupby("itemId")[COORDINATES].agg(["min", "max", "std", "mean"])
-    feat3 = votes[["userId"]].groupby("itemId").count()
-    return pd.concat([feat, feat2, feat3], axis=1)
-
-
-def yield_batch(data, batch=BATCH):
+def yield_batch(data):
     """Обучающие примеры."""
     votes, answers = data
-    feat = make_features(votes)
-    item_ids = votes.index.unique()
+    item_ids = list(set(votes.index))
     while True:
-        item_id = np.random.choice(item_ids, batch)
-        x = feat.loc[item_id]
-        y = answers.loc[item_id]
+        item_id = np.random.choice(item_ids, 1)
+        forecasts = votes.loc[item_id].set_index("userId")
+        x = np.zeros((1, len(forecasts), 4),)
+        y = np.zeros((1, 4))
+        x[0] = forecasts.sample(len(forecasts))
+        y[0] = answers.loc[item_id]
         yield x, y
 
 
 def yield_batch_val(data):
     """Примеры для валидации."""
     votes, answers = data
-    feat = make_features(votes)
-    item_ids = votes.index.unique()
+    item_ids = set(votes.index)
     while True:
-        x = feat.loc[item_ids]
-        y = answers.loc[item_ids]
-        yield x, y
+        for item_id in item_ids:
+            forecasts = votes.loc[item_id].set_index("userId")
+            x = np.zeros((1, len(forecasts), 4),)
+            y = np.zeros((1, 4))
+            x[0] = forecasts
+            y[0] = answers.loc[item_id]
+            yield x, y
 
 
 def yield_batch_test(data):
     """Примеры для тестирования."""
-    feat = make_features(data)
     item_ids = data.index.unique()
     for item_id in item_ids:
-        x = feat.loc[[item_id]]
+        forecasts = data.loc[item_id].set_index("userId")
+        x = np.zeros((1, len(forecasts), 4),)
+        x[0] = forecasts
         yield x
 
 
-def make_model(units=UNITS, height=HEIGHT):
+def make_model(filters=FILTERS, height=HEIGHT):
     """Создает сеть на основе сгенеренных признаков."""
     backend.clear_session()
 
-    y = x = layers.Input(shape=(21,))
-    y_rez = layers.Lambda(lambda z: z[:, :4])(y)
+    y = x = layers.Input(shape=(None, 4))
 
-    for i in range(height, 0, -1):
-        y = layers.Dense(
-            units=units * 2 ** (i - 1),
+    y = layers.Conv1D(
+        filters=filters,
+        kernel_size=1,
+        strides=1,
+        padding="same",
+        activation=None
+    )(y)
+
+    for i in range(height):
+        y_rez = y
+        y = layers.Conv1D(
+            filters=filters,
+            kernel_size=3,
+            strides=1,
+            padding="same",
             activation="relu"
         )(y)
+        y = layers.add([y_rez, y])
 
+    y = layers.GlobalAveragePooling1D()(y)
+
+    y = layers.Dense(
+        units=filters // 2,
+        activation="relu"
+    )(y)
     y = layers.Dense(
         units=4,
         activation=None
     )(y)
-    y = layers.add([y_rez, y])
 
     model = models.Model(inputs=x, outputs=y)
     model.summary()
     return model
 
 
-def train_model(data_train, data_val, lr_max=LR_MAX, batch=BATCH, epochs=EPOCHS):
+def train_model(data_train, data_val, lr_max=LR_MAX, epochs=EPOCHS):
     """Обучение модели."""
-    steps_per_epoch = 1000 // batch
+    steps_per_epoch = 1000
     path = str(DATA_PATH / "model.h5")
 
     model = make_model()
+    model.compile(
+        optimizer=optimizers.Nadam(),
+        loss="mae",
+        metrics=[iou.intersection_over_union],
+    )
+    model.fit_generator(
+        yield_batch(data_train),
+        steps_per_epoch=steps_per_epoch,
+        epochs=3,
+        validation_data=yield_batch_val(data_val),
+        validation_steps=len(data_val[1].index),
+    )
+
     model.compile(
         optimizer=optimizers.Nadam(),
         loss=iou.intersection_over_union
@@ -110,12 +137,12 @@ def train_model(data_train, data_val, lr_max=LR_MAX, batch=BATCH, epochs=EPOCHS)
     )
     cb = [save_callback, lr_callback]
     rez = model.fit_generator(
-        yield_batch(data_train, batch),
+        yield_batch(data_train),
         steps_per_epoch=steps_per_epoch,
         epochs=epochs,
         callbacks=cb,
         validation_data=yield_batch_val(data_val),
-        validation_steps=1,
+        validation_steps=len(data_val[1].index),
     )
 
     model = models.load_model(
@@ -165,7 +192,34 @@ def train_oof(train_set, test_set):
     prediction.to_csv(DATA_PATH / f"sub-{-mean - 2 * err:0.5f}.csv", header=False)
 
 
-if __name__ == '__main__':
+def train():
+    """Тренировка модели."""
     train_set = (load_data.train_x(), load_data.train_y())
     test_set = load_data.test_x()
     train_oof(train_set, test_set)
+
+
+def find_lr():
+    """Поиск максимального lr."""
+    train_set = (load_data.train_x(), load_data.train_y())
+    model = make_model()
+    model.compile(
+        optimizer=optimizers.Nadam(),
+        loss="mae",
+        metrics=[iou.intersection_over_union],
+    )
+    model.fit_generator(
+        yield_batch(train_set),
+        steps_per_epoch=12,
+        epochs=1
+    )
+    model.compile(
+        optimizer=optimizers.Nadam(),
+        loss=iou.intersection_over_union
+    )
+
+    lr.get_max_lr(model, yield_batch(train_set))
+
+
+if __name__ == '__main__':
+    train()
