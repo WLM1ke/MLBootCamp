@@ -10,6 +10,7 @@ import pandas as pd
 from keras import optimizers
 from sklearn import model_selection
 
+from src import conv1d
 from src import load_data
 from src import iou
 from src import lr
@@ -22,8 +23,8 @@ DATA_PATH.mkdir(parents=True, exist_ok=True)
 FOLDS = 10
 EPOCHS = 100
 FILTERS = 64
-HEIGHT = 6
-LR_MAX = 2.5e-04
+HEIGHT = 3
+LR_MAX = 5.1e-04
 
 
 def yield_batch(data):
@@ -79,15 +80,7 @@ def make_model(filters=FILTERS, height=HEIGHT):
     )(y)
 
     for i in range(height):
-        y_rez = y
-        y = layers.Conv1D(
-            filters=filters,
-            kernel_size=3,
-            strides=1,
-            padding="same",
-            activation="relu"
-        )(y)
-        y = layers.add([y_rez, y])
+        y = conv1d.reznet_block(y)
 
     y = layers.GlobalAveragePooling1D()(y)
 
@@ -118,8 +111,8 @@ def train_model(data_train, data_val, lr_max=LR_MAX, epochs=EPOCHS):
     )
     model.fit_generator(
         yield_batch(data_train),
-        steps_per_epoch=steps_per_epoch,
-        epochs=3,
+        steps_per_epoch=3000,
+        epochs=1,
         validation_data=yield_batch_val(data_val),
         validation_steps=len(data_val[1].index),
     )
@@ -210,7 +203,7 @@ def find_lr():
     )
     model.fit_generator(
         yield_batch(train_set),
-        steps_per_epoch=12,
+        steps_per_epoch=30,
         epochs=1
     )
     model.compile(
