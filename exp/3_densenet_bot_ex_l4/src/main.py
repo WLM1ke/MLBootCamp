@@ -1,4 +1,4 @@
-"""Модель на основе Keras с сырыми данными а-ля RezNet."""
+"""Модель на основе Keras с сырыми данными а-ля RezNet с бутылочным блоком."""
 import pathlib
 
 from keras import backend
@@ -20,11 +20,16 @@ COORDINATES = load_data.COORDINATES
 DATA_PATH = pathlib.Path("../processed")
 DATA_PATH.mkdir(parents=True, exist_ok=True)
 
+BLOCKS = 4
+LINK = conv1d.Links.DENSENET
+CHANNELS = 64
+LAYERS_TYPE = conv1d.Layers.BOTTLENECK
+SE = True
+
+
 FOLDS = 10
 EPOCHS = 100
-FILTERS = 64
-HEIGHT = 3
-LR_MAX = 5.1e-04
+LR_MAX = 8.3e-04
 
 
 def yield_batch(data):
@@ -65,25 +70,13 @@ def yield_batch_test(data):
         yield x
 
 
-def make_model(filters=FILTERS, height=HEIGHT):
+def make_model(filters=CHANNELS):
     """Создает сеть на основе сгенеренных признаков."""
     backend.clear_session()
 
     y = x = layers.Input(shape=(None, 4))
-
-    y = layers.Conv1D(
-        filters=filters,
-        kernel_size=1,
-        strides=1,
-        padding="same",
-        activation=None
-    )(y)
-
-    for i in range(height):
-        y = conv1d.reznet_block(y)
-
+    y = conv1d.make_net(y, BLOCKS, LINK, CHANNELS, LAYERS_TYPE, se=SE)
     y = layers.GlobalAveragePooling1D()(y)
-
     y = layers.Dense(
         units=filters // 2,
         activation="relu"

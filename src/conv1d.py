@@ -1,101 +1,61 @@
 """Различные архитектурные элементы сверточных сетей для 1d."""
+import functools
+from enum import Enum
+from typing import Callable
 from typing import Optional
 
 from keras import layers
 import tensorflow as tf
 
 
-def reznet_block(x: tf.Tensor, bach_norm: bool = False) -> tf.Tensor:
-    """Обычный блок RezNet для неглубоких сетей.
-
-    :param x:
-        Тензор из 1D сверточной сети вида (None, time_steps, channels).
-    :param bach_norm:
-        Нужна ли бач-нормализация.
-    :return:
-        Исходящий 1D сверточной сети вида (None, time_steps, channels).
-    """
-    channels = int(x.shape[-1])
-    y = x
-
+def reznet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+    """Стандартный набор слоев в RezNet v2."""
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(y)
-
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(x)
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(y)
-
-    y = layers.add([x, y])
-    return y
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(x)
+    return x
 
 
-def reznet_bottleneck_block(x: tf.Tensor, bach_norm: bool = False) -> tf.Tensor:
-    """Обычный узкий и длинный блок RezNet для глубоких сетей.
-
-    Используется предактивация и пропуск скип соединения без каких-либо модификаций, как сделано в v2.
-    По вычислительной сложности при числе каналов в 8 раза больше обычного блока имеет сопоставимое число параметров и
-    вычислительную сложность.
-
-    :param x:
-        Тензор из 1D сверточной сети вида (None, time_steps, channels).
-    :param bach_norm:
-        Нужна ли бач-нормализация.
-    :return:
-        Исходящий 1D сверточной сети вида (None, time_steps, channels).
-    """
-    channels = int(x.shape[-1])
-    y = x
-
+def reznet_bottleneck_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+    """Набор слоев в RezNet v2 с бутылочным горлышком - обычно для более глубоких сетей."""
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels // 4, kernel_size=1, strides=1, padding="same")(y)
-
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels // 4, kernel_size=1, strides=1, padding="same")(x)
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels // 4, kernel_size=3, strides=1, padding="same")(y)
-
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels // 4, kernel_size=3, strides=1, padding="same")(x)
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels, kernel_size=1, strides=1, padding="same")(y)
-
-    y = layers.add([x, y])
-    return y
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels, kernel_size=1, strides=1, padding="same")(x)
+    return x
 
 
-def densenet_block(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.Tensor:
-    """Обычный блок DenseNet.
-
-    Используется меньше входных каналов. При том же числе параметров обычно лучше RezNet.
-
-    :param x:
-        Тензор из 1D сверточной сети вида (None, time_steps, channels).
-    :param channels:
-        На входе первого блока.
-    :param bach_norm:
-        Нужна ли бач-нормализация.
-    :return:
-        Исходящий 1D сверточной сети вида (None, time_steps, channels).
-    """
-    y = x
-
+def densenet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+    """Стандартный набор слоев в DenseNet."""
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(4 * channels, kernel_size=1, strides=1, padding="same")(y)
-
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(4 * channels, kernel_size=1, strides=1, padding="same")(x)
     if bach_norm:
-        y = layers.BatchNormalization()(y)
-    y = layers.Activation("relu")(y)
-    y = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(y)
+        x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
+    x = layers.Conv1D(channels, kernel_size=3, strides=1, padding="same")(x)
+    return x
 
-    y = layers.concatenate([x, y])
-    return y
+
+class Layers(Enum):
+    """Базовые слои для построения сети."""
+    COMMON = reznet_layers
+    BOTTLENECK = reznet_bottleneck_layers
+    DENSE = densenet_layers
 
 
 def se_block(x: tf.Tensor, ratio: Optional[int] = None) -> tf.Tensor:
@@ -106,7 +66,8 @@ def se_block(x: tf.Tensor, ratio: Optional[int] = None) -> tf.Tensor:
     :param x:
         Тензор из 1D сверточной сети вида (None, time_steps, channels).
     :param ratio:
-        Кратность сокращения количества каналов (squeeze) - по умолчанию уменьшается до корня от количества каналов.
+        Кратность от 0.0 до 1ю0 сокращения количества каналов (squeeze) - по умолчанию уменьшается до корня от
+        количества каналов.
     :return:
         Взвешенный с помощью squeeze-and-Excitation входной тензор.
     """
@@ -119,3 +80,96 @@ def se_block(x: tf.Tensor, ratio: Optional[int] = None) -> tf.Tensor:
     y = layers.Dense(bottleneck, activation="relu")(y)
     y = layers.Dense(channels, activation="sigmoid")(y)
     return layers.multiply([x, y])
+
+
+def reznet_link(
+        x: tf.Tensor,
+        layers_func: Callable[[tf.Tensor], tf.Tensor],
+) -> tf.Tensor:
+    """Остаточное соединение из RezNet.
+
+    :param x:
+        Тензор из 1D сверточной сети вида (None, time_steps, channels).
+    :param layers_func:
+        Функция с основными слоями преобразования сети.
+    :return:
+        Результат применения основного преобразования и скипа.
+    """
+    y = x
+    y = layers_func(y)
+    y = layers.add([x, y])
+    return y
+
+
+def densenet_link(
+        x: tf.Tensor,
+        layers_func: Callable[[tf.Tensor], tf.Tensor]
+) -> tf.Tensor:
+    """Остаточное соединение из DenseNet.
+
+    :param x:
+        Тензор из 1D сверточной сети вида (None, time_steps, channels).
+    :param layers_func:
+        Функция с основными слоями преобразования сети.
+    :return:
+        Результат применения основного преобразования и скипа.
+    """
+    y = x
+    y = layers_func(y)
+    y = layers.concatenate([x, y])
+    return y
+
+
+class Links(Enum):
+    """Тип остаточного соединения."""
+    REZNET = reznet_link
+    DENSENET = densenet_link
+
+
+def make_net(
+        x: tf.Tensor,
+        blocks: int,
+        link: Links,
+        channels: int,
+        layers_type: Layers,
+        bach_norm: bool = False,
+        se: bool = False
+) -> tf.Tensor:
+    """Построение сети по мотивам основных сверточных архитектур.
+
+    :param x:
+        Тензор из 1D сверточной сети вида (None, time_steps, channels).
+    :param blocks:
+        Количество блоков.
+    :param link:
+        Тип остаточного соединения.
+    :param channels:
+        Количество каналов.
+    :param layers_type:
+        Тип слоев в блоке.
+    :param bach_norm:
+        Нужна ли бач-нормализация основных слоев.
+    :param se:
+        Нужно ли взвесить блок с помощью Squeeze-and-Excitation.
+    :return:
+        Результирующий тензор.
+    """
+    y = layers.Conv1D(
+        filters=channels,
+        kernel_size=1,
+        strides=1,
+        padding="same",
+        activation=None
+    )(x)
+    for i in range(blocks):
+        layers_func = functools.partial(layers_type, channels=channels, bach_norm=bach_norm)
+
+        def se_wrap(tensor: tf.Tensor) -> tf.Tensor:
+            """Обертка Squeeze-and-Excitation."""
+            return se_block(layers_func(tensor))
+
+        if se:
+            y = link(y, se_wrap)
+        else:
+            y = link(y, layers_func)
+    return y
