@@ -1,4 +1,4 @@
-"""Модель на основе Keras с сгенеренными приззнаками."""
+"""Модель на основе Keras с сгенеренными признаками."""
 import pathlib
 
 from keras import backend

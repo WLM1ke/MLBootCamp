@@ -1,5 +1,4 @@
 """Различные архитектурные элементы сверточных сетей для 1d."""
-import functools
 from enum import Enum
 from typing import Callable
 from typing import Optional
@@ -8,7 +7,7 @@ from keras import layers
 import tensorflow as tf
 
 
-def reznet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+def reznet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.Tensor:
     """Стандартный набор слоев в RezNet v2."""
     if bach_norm:
         x = layers.BatchNormalization()(x)
@@ -21,7 +20,7 @@ def reznet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
     return x
 
 
-def reznet_bottleneck_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+def reznet_bottleneck_layers(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.Tensor:
     """Набор слоев в RezNet v2 с бутылочным горлышком - обычно для более глубоких сетей."""
     if bach_norm:
         x = layers.BatchNormalization()(x)
@@ -38,7 +37,7 @@ def reznet_bottleneck_layers(x: tf.Tensor, channels: int, bach_norm: bool = Fals
     return x
 
 
-def densenet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
+def densenet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.Tensor:
     """Стандартный набор слоев в DenseNet."""
     if bach_norm:
         x = layers.BatchNormalization()(x)
@@ -53,9 +52,12 @@ def densenet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False):
 
 class Layers(Enum):
     """Базовые слои для построения сети."""
-    COMMON = reznet_layers
-    BOTTLENECK = reznet_bottleneck_layers
-    DENSE = densenet_layers
+    COMMON = (reznet_layers, )
+    BOTTLENECK = (reznet_bottleneck_layers, )
+    DENSE = (densenet_layers, )
+
+    def __init__(self, func: Callable[[tf.Tensor, int, bool], tf.Tensor]):
+        self.func = func
 
 
 def se_block(x: tf.Tensor, ratio: Optional[int] = None) -> tf.Tensor:
@@ -122,8 +124,11 @@ def densenet_link(
 
 class Links(Enum):
     """Тип остаточного соединения."""
-    REZNET = reznet_link
-    DENSENET = densenet_link
+    REZNET = (reznet_link, )
+    DENSENET = (densenet_link, )
+
+    def __init__(self, func: Callable[[tf.Tensor, Callable[[tf.Tensor], tf.Tensor]], tf.Tensor]):
+        self.func = func
 
 
 def make_net(
@@ -162,14 +167,17 @@ def make_net(
         activation=None
     )(x)
     for i in range(blocks):
-        layers_func = functools.partial(layers_type, channels=channels, bach_norm=bach_norm)
+
+        def layers_func(tensor: tf.Tensor) -> tf.Tensor:
+            """Частичная обертка вокруг функции слоя."""
+            return layers_type.func(tensor, channels, bach_norm)
 
         def se_wrap(tensor: tf.Tensor) -> tf.Tensor:
             """Обертка Squeeze-and-Excitation."""
             return se_block(layers_func(tensor))
 
         if se:
-            y = link(y, se_wrap)
+            y = link.func(y, se_wrap)
         else:
-            y = link(y, layers_func)
+            y = link.func(y, layers_func)
     return y

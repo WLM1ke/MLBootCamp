@@ -1,4 +1,4 @@
-"""Модель на основе Keras с сырыми данными а-ля DenseNet с бутылочным блоком Squeeze-and-Excitation."""
+"""Модель на основе Keras с сырыми данными а-ля DenseNet с бутылочным блоком."""
 import pathlib
 
 from keras import backend
