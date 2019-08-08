@@ -50,11 +50,31 @@ def densenet_layers(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.
     return x
 
 
+def xception_layers(x: tf.Tensor, channels: int, bach_norm: bool = False) -> tf.Tensor:
+    """Стандартный набор слоев в Xception."""
+    x = layers.Activation("relu")(x)
+    x = layers.SeparableConv1D(channels, kernel_size=3, strides=1, padding="same")(x)
+    if bach_norm:
+        x = layers.BatchNormalization()(x)
+
+    x = layers.Activation("relu")(x)
+    x = layers.SeparableConv1D(channels, kernel_size=3, strides=1, padding="same")(x)
+    if bach_norm:
+        x = layers.BatchNormalization()(x)
+
+    x = layers.Activation("relu")(x)
+    x = layers.SeparableConv1D(channels, kernel_size=3, strides=1, padding="same")(x)
+    if bach_norm:
+        x = layers.BatchNormalization()(x)
+    return x
+
+
 class Layers(Enum):
     """Базовые слои для построения сети."""
     COMMON = (reznet_layers, )
     BOTTLENECK = (reznet_bottleneck_layers, )
     DENSE = (densenet_layers, )
+    XCEPTION = (xception_layers,)
 
     def __init__(self, func: Callable[[tf.Tensor, int, bool], tf.Tensor]):
         self.func = func
